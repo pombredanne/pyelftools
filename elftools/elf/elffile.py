@@ -20,7 +20,6 @@ from .gnuversions import (
         GNUVerNeedSection, GNUVerDefSection,
         GNUVerSymSection)
 from .segments import Segment, InterpSegment
-from .enums import ENUM_RELOC_TYPE_i386, ENUM_RELOC_TYPE_x64
 from ..dwarf.dwarfinfo import DWARFInfo, DebugSectionDescriptor, DwarfConfig
 
 
@@ -249,7 +248,7 @@ class ELFFile(object):
             return StringTableSection(section_header, name, self.stream)
         elif sectype == 'SHT_NULL':
             return NullSection(section_header, name, self.stream)
-        elif sectype in ('SHT_SYMTAB', 'SHT_DYNSYM'):
+        elif sectype in ('SHT_SYMTAB', 'SHT_DYNSYM', 'SHT_SUNW_LDYNSYM'):
             return self._make_symbol_table_section(section_header, name)
         elif sectype == 'SHT_SUNW_syminfo':
             return self._make_sunwsyminfo_table_section(section_header, name)

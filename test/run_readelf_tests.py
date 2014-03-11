@@ -23,14 +23,10 @@ testlog = logging.getLogger('run_tests')
 testlog.setLevel(logging.DEBUG)
 testlog.addHandler(logging.StreamHandler(sys.stdout))
 
-# Set the path for calling readelf. By default this is the system readelf.
-# The first assignment to READELF_PATH reflects the binutils version I used
-# to test the current pyelftools with.
-# Alas, binutils's readelf changes its output slightly even between minor
-# releases so a lot of bogus differences can occur; this is why an exact version
-# is specified to reproduce the tests.
-#
-READELF_PATH = '/home/eliben/test/binutils-2.23.52/binutils/readelf'
+# Set the path for calling readelf. We carry our own version of readelf around,
+# because binutils tend to change its output even between daily builds of the
+# same minor release and keeping track is a headache.
+READELF_PATH = 'test/external_tools/readelf'
 if not os.path.exists(READELF_PATH):
     READELF_PATH = 'readelf'
 
@@ -125,8 +121,19 @@ def compare_output(s1, s2):
         # Compare ignoring whitespace
         lines1_parts = lines1[i].split()
         lines2_parts = lines2[i].split()
+
         if ''.join(lines1_parts) != ''.join(lines2_parts):
             ok = False
+
+            try:
+                # Ignore difference in precision of hex representation in the
+                # last part (i.e. 008f3b vs 8f3b)
+                if (''.join(lines1_parts[:-1]) == ''.join(lines2_parts[:-1]) and
+                    int(lines1_parts[-1], 16) == int(lines2_parts[-1], 16)):
+                    ok = True
+            except ValueError:
+                pass
+
             sm = SequenceMatcher()
             sm.set_seqs(lines1[i], lines2[i])
             changes = sm.get_opcodes()
@@ -155,8 +162,8 @@ def compare_output(s1, s2):
                         ok = True
                         break
             if not ok:
-                errmsg = 'Mismatch on line #%s:\n>>%s<<\n>>%s<<\n' % (
-                    i, lines1[i], lines2[i])
+                errmsg = 'Mismatch on line #%s:\n>>%s<<\n>>%s<<\n (%r)' % (
+                    i, lines1[i], lines2[i], changes)
                 return False, errmsg
     return True, ''
 

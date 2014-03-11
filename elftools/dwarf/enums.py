@@ -7,6 +7,7 @@
 # This code is in the public domain
 #-------------------------------------------------------------------------------
 from ..construct import Pass
+from ..common.py3compat import iteritems
 
 
 ENUM_DW_TAG = dict(
@@ -52,10 +53,12 @@ ENUM_DW_TAG = dict(
     DW_TAG_namelist_items           = 0x2c,
     DW_TAG_packed_type              = 0x2d,
     DW_TAG_subprogram               = 0x2e,
-    DW_TAG_template_type_parameter  = 0x2f,
+
+    # The DWARF standard defines these as _parameter, not _param, but we
+    # maintain compatibility with readelf.
     DW_TAG_template_type_param      = 0x2f,
-    DW_TAG_template_value_parameter = 0x30,
     DW_TAG_template_value_param     = 0x30,
+
     DW_TAG_thrown_type              = 0x31,
     DW_TAG_try_block                = 0x32,
     DW_TAG_variant_part             = 0x33,
@@ -274,4 +277,7 @@ ENUM_DW_FORM = dict(
     DW_FORM_GNU_ref_alt     = 0x1f20,
     _default_               = Pass,
 )
+
+# Inverse mapping for ENUM_DW_FORM
+DW_FORM_raw2name = dict((v, k) for k, v in iteritems(ENUM_DW_FORM))
 

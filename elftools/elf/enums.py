@@ -194,6 +194,7 @@ ENUM_SH_TYPE = dict(
     SHT_LOUSER=0x80000000,
     SHT_HIUSER=0xffffffff,
     SHT_AMD64_UNWIND=0x70000001,
+    SHT_SUNW_LDYNSYM=0x6ffffff3,
     SHT_SUNW_syminfo=0x6ffffffc,
     SHT_ARM_EXIDX=0x70000001,
     SHT_ARM_PREEMPTMAP=0x70000002,
@@ -264,6 +265,9 @@ ENUM_ST_VISIBILITY = dict(
     STV_INTERNAL=1,
     STV_HIDDEN=2,
     STV_PROTECTED=3,
+    STV_EXPORTED=4,
+    STV_SINGLETON=5,
+    STV_ELIMINATE=6,
     _default_=Pass,
 )
 
@@ -467,7 +471,7 @@ ENUM_SUNW_SYMINFO_BOUNDTO = dict(
     _default_=Pass,
 )
 
-# Versym section, version dependency index 
+# Versym section, version dependency index
 ENUM_VERSYM = dict(
     VER_NDX_LOCAL=0,
     VER_NDX_GLOBAL=1,
