@@ -13,7 +13,6 @@ import sys
 # examples/ dir of the source distribution.
 sys.path[0:0] = ['.', '..']
 
-from elftools.common.py3compat import bytes2str
 from elftools.elf.elffile import ELFFile
 
 
@@ -23,12 +22,11 @@ def process_file(filename):
         elffile = ELFFile(f)
 
         for section in elffile.iter_sections():
-            # Section names are bytes objects
-            if section.name.startswith(b'.debug'):
-                print('  ' + bytes2str(section.name))
+            if section.name.startswith('.debug'):
+                print('  ' + section.name)
 
 
 if __name__ == '__main__':
-    for filename in sys.argv[1:]:
-        process_file(filename)
-
+    if sys.argv[1] == '--test':
+        for filename in sys.argv[2:]:
+            process_file(filename)

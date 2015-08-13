@@ -35,7 +35,8 @@ def reference_output_path(example_path):
     """
     examples_root, example_name = os.path.split(example_path)
     example_noext, _ = os.path.splitext(example_name)
-    return os.path.join(examples_root, 'reference_output', example_noext + '.out')
+    return os.path.join(examples_root, 'reference_output',
+                        example_noext + '.out')
 
 
 def run_example_and_compare(example_path):
@@ -50,7 +51,8 @@ def run_example_and_compare(example_path):
         testlog.info('.......ERROR - reference output cannot be read! - %s' % e)
         return False
 
-    rc, example_out = run_exe(example_path, ['./examples/sample_exe64.elf'])
+    rc, example_out = run_exe(example_path, ['--test',
+                                             './examples/sample_exe64.elf'])
     if rc != 0:
         testlog.info('.......ERROR - example returned error code %s' % rc)
         return False

@@ -19,7 +19,7 @@ from .relocation import RelocationSection, RelocationHandler
 from .gnuversions import (
         GNUVerNeedSection, GNUVerDefSection,
         GNUVerSymSection)
-from .segments import Segment, InterpSegment
+from .segments import Segment, InterpSegment, NoteSegment
 from ..dwarf.dwarfinfo import DWARFInfo, DebugSectionDescriptor, DwarfConfig
 
 
@@ -108,12 +108,24 @@ class ELFFile(object):
         for i in range(self.num_segments()):
             yield self.get_segment(i)
 
+    def address_offsets(self, start, size=1):
+        """ Yield a file offset for each ELF segment containing a memory region.
+
+            A memory region is defined by the range [start...start+size). The
+            offset of the region is yielded.
+        """
+        end = start + size
+        for seg in self.iter_segments():
+            if (start >= seg['p_vaddr'] and
+                end <= seg['p_vaddr'] + seg['p_filesz']):
+                yield start - seg['p_vaddr'] + seg['p_offset']
+
     def has_dwarf_info(self):
         """ Check whether this file appears to have debugging information.
             We assume that if it has the debug_info section, it has all theother
             required sections as well.
         """
-        return bool(self.get_section_by_name(b'.debug_info'))
+        return bool(self.get_section_by_name('.debug_info'))
 
     def get_dwarf_info(self, relocate_dwarf_sections=True):
         """ Return a DWARFInfo object representing the debugging information in
@@ -127,9 +139,9 @@ class ELFFile(object):
         # Sections that aren't found will be passed as None to DWARFInfo.
         #
         debug_sections = {}
-        for secname in (b'.debug_info', b'.debug_abbrev', b'.debug_str',
-                        b'.debug_line', b'.debug_frame',
-                        b'.debug_loc', b'.debug_ranges'):
+        for secname in ('.debug_info', '.debug_abbrev', '.debug_str',
+                        '.debug_line', '.debug_frame',
+                        '.debug_loc', '.debug_ranges'):
             section = self.get_section_by_name(secname)
             if section is None:
                 debug_sections[secname] = None
@@ -141,17 +153,17 @@ class ELFFile(object):
         return DWARFInfo(
                 config=DwarfConfig(
                     little_endian=self.little_endian,
-                    default_address_size=self.elfclass / 8,
+                    default_address_size=self.elfclass // 8,
                     machine_arch=self.get_machine_arch()),
-                debug_info_sec=debug_sections[b'.debug_info'],
-                debug_abbrev_sec=debug_sections[b'.debug_abbrev'],
-                debug_frame_sec=debug_sections[b'.debug_frame'],
+                debug_info_sec=debug_sections['.debug_info'],
+                debug_abbrev_sec=debug_sections['.debug_abbrev'],
+                debug_frame_sec=debug_sections['.debug_frame'],
                 # TODO(eliben): reading of eh_frame is not hooked up yet
                 eh_frame_sec=None,
-                debug_str_sec=debug_sections[b'.debug_str'],
-                debug_loc_sec=debug_sections[b'.debug_loc'],
-                debug_ranges_sec=debug_sections[b'.debug_ranges'],
-                debug_line_sec=debug_sections[b'.debug_line'])
+                debug_str_sec=debug_sections['.debug_str'],
+                debug_loc_sec=debug_sections['.debug_loc'],
+                debug_ranges_sec=debug_sections['.debug_ranges'],
+                debug_line_sec=debug_sections['.debug_line'])
 
     def get_machine_arch(self):
         """ Return the machine architecture, as detected from the ELF header.
@@ -165,6 +177,8 @@ class ELFFile(object):
             return 'ARM'
         elif self['e_machine'] == 'EM_AARCH64':
             return 'AArch64'
+        elif self['e_machine'] == 'EM_MIPS':
+            return 'MIPS'
         else:
             return '<unknown>'
 
@@ -220,6 +234,8 @@ class ELFFile(object):
             return InterpSegment(segment_header, self.stream)
         elif segtype == 'PT_DYNAMIC':
             return DynamicSegment(segment_header, self.stream, self)
+        elif segtype == 'PT_NOTE':
+            return NoteSegment(segment_header, self.stream, self)
         else:
             return Segment(segment_header, self.stream)
 
@@ -360,5 +376,3 @@ class ELFFile(object):
                 name=section.name,
                 global_offset=section['sh_offset'],
                 size=section['sh_size'])
-
-

@@ -23,7 +23,7 @@ from elftools.common.py3compat import (
 from elftools.elf.elffile import ELFFile
 from elftools.elf.dynamic import DynamicSection, DynamicSegment
 from elftools.elf.enums import ENUM_D_TAG
-from elftools.elf.segments import InterpSegment
+from elftools.elf.segments import InterpSegment, NoteSegment
 from elftools.elf.sections import SymbolTableSection
 from elftools.elf.gnuversions import (
     GNUVerSymSection, GNUVerDefSection,
@@ -37,7 +37,7 @@ from elftools.elf.descriptions import (
     describe_sh_type, describe_sh_flags,
     describe_symbol_type, describe_symbol_bind, describe_symbol_visibility,
     describe_symbol_shndx, describe_reloc_type, describe_dyn_tag,
-    describe_ver_flags,
+    describe_ver_flags, describe_note
     )
 from elftools.elf.constants import E_FLAGS
 from elftools.dwarf.dwarfinfo import DWARFInfo
@@ -127,6 +127,16 @@ class ReadElf(object):
             version = flags & E_FLAGS.EF_ARM_EABIMASK
             if version == E_FLAGS.EF_ARM_EABI_VER5:
                 description += ", Version5 EABI"
+        elif self.elffile['e_machine'] == "EM_MIPS":
+            if flags & E_FLAGS.EF_MIPS_NOREORDER:
+                description += ", noreorder"
+            if flags & E_FLAGS.EF_MIPS_CPIC:
+                description += ", cpic"
+            if not (flags & E_FLAGS.EF_MIPS_ABI2) and not (flags & E_FLAGS.EF_MIPS_ABI_ON32):
+                description += ", o32"
+            if (flags & E_FLAGS.EF_MIPS_ARCH) == E_FLAGS.EF_MIPS_ARCH_1:
+                description += ", mips1"
+
         return description
 
     def display_program_headers(self, show_heading=True):
@@ -194,7 +204,7 @@ class ReadElf(object):
 
             if isinstance(segment, InterpSegment):
                 self._emitline('      [Requesting program interpreter: %s]' %
-                    bytes2str(segment.get_interp_name()))
+                    segment.get_interp_name())
 
         # Sections to segments mapping
         #
@@ -211,7 +221,7 @@ class ReadElf(object):
             for section in self.elffile.iter_sections():
                 if (    not section.is_null() and
                         segment.section_in_segment(section)):
-                    self._emit('%s ' % bytes2str(section.name))
+                    self._emit('%s ' % section.name)
 
             self._emitline('')
 
@@ -238,7 +248,7 @@ class ReadElf(object):
         #
         for nsec, section in enumerate(self.elffile.iter_sections()):
             self._emit('  [%2u] %-17.17s %-15.15s ' % (
-                nsec, bytes2str(section.name), describe_sh_type(section['sh_type'])))
+                nsec, section.name, describe_sh_type(section['sh_type'])))
 
             if self.elffile.elfclass == 32:
                 self._emitline('%s %s %s %s %3s %2s %3s %2s' % (
@@ -282,11 +292,11 @@ class ReadElf(object):
 
             if section['sh_entsize'] == 0:
                 self._emitline("\nSymbol table '%s' has a sh_entsize of zero!" % (
-                    bytes2str(section.name)))
+                    section.name))
                 continue
 
             self._emitline("\nSymbol table '%s' contains %s entries:" % (
-                bytes2str(section.name), section.num_symbols()))
+                section.name, section.num_symbols()))
 
             if self.elffile.elfclass == 32:
                 self._emitline('   Num:    Value  Size Type    Bind   Vis      Ndx Name')
@@ -300,7 +310,7 @@ class ReadElf(object):
                 if (section['sh_type'] == 'SHT_DYNSYM' and
                         self._versioninfo['type'] == 'GNU'):
                     version = self._symbol_version(nsym)
-                    if (version['name'] != bytes2str(symbol.name) and
+                    if (version['name'] != symbol.name and
                         version['index'] not in ('VER_NDX_LOCAL',
                                                  'VER_NDX_GLOBAL')):
                         if version['filename']:
@@ -323,7 +333,7 @@ class ReadElf(object):
                     describe_symbol_bind(symbol['st_info']['bind']),
                     describe_symbol_visibility(symbol['st_other']['visibility']),
                     describe_symbol_shndx(symbol['st_shndx']),
-                    bytes2str(symbol.name),
+                    symbol.name,
                     version_info))
 
     def display_dynamic_tags(self):
@@ -343,18 +353,16 @@ class ReadElf(object):
             padding = 20 + (8 if self.elffile.elfclass == 32 else 0)
             for tag in section.iter_tags():
                 if tag.entry.d_tag == 'DT_NEEDED':
-                    parsed = 'Shared library: [%s]' % bytes2str(tag.needed)
+                    parsed = 'Shared library: [%s]' % tag.needed
                 elif tag.entry.d_tag == 'DT_RPATH':
-                    parsed = 'Library rpath: [%s]' % bytes2str(tag.rpath)
+                    parsed = 'Library rpath: [%s]' % tag.rpath
                 elif tag.entry.d_tag == 'DT_RUNPATH':
-                    parsed = 'Library runpath: [%s]' % bytes2str(tag.runpath)
+                    parsed = 'Library runpath: [%s]' % tag.runpath
                 elif tag.entry.d_tag == 'DT_SONAME':
-                    parsed = 'Library soname: [%s]' % bytes2str(tag.soname)
-                elif (tag.entry.d_tag.endswith('SZ') or
-                      tag.entry.d_tag.endswith('ENT')):
+                    parsed = 'Library soname: [%s]' % tag.soname
+                elif tag.entry.d_tag.endswith(('SZ', 'ENT')):
                     parsed = '%i (bytes)' % tag['d_val']
-                elif (tag.entry.d_tag.endswith('NUM') or
-                      tag.entry.d_tag.endswith('COUNT')):
+                elif tag.entry.d_tag.endswith(('NUM', 'COUNT')):
                     parsed = '%i' % tag['d_val']
                 elif tag.entry.d_tag == 'DT_PLTREL':
                     s = describe_dyn_tag(tag.entry.d_val)
@@ -375,6 +383,23 @@ class ReadElf(object):
             if self.elffile.num_segments():
                 self._emitline("\nThere is no dynamic section in this file.")
 
+    def display_notes(self):
+        """ Display the notes contained in the file
+        """
+        for segment in self.elffile.iter_segments():
+            if isinstance(segment, NoteSegment):
+                for note in segment.iter_notes():
+                      self._emitline(
+                          "\nDisplaying notes found at file offset "
+                          "%s with length %s:" % (
+                              self._format_hex(note['n_offset'], fieldsize=8),
+                              self._format_hex(note['n_size'], fieldsize=8)))
+                      self._emitline('  Owner                 Data size	Description')
+                      self._emitline('  %s%s %s\t%s' % (
+                          note['n_name'], ' ' * (20 - len(note['n_name'])),
+                          self._format_hex(note['n_descsz'], fieldsize=8),
+                          describe_note(note)))
+
     def display_relocations(self):
         """ Display the relocations contained in the file
         """
@@ -385,7 +410,7 @@ class ReadElf(object):
 
             has_relocation_sections = True
             self._emitline("\nRelocation section '%s' at offset %s contains %s entries:" % (
-                bytes2str(section.name),
+                section.name,
                 self._format_hex(section['sh_offset']),
                 section.num_relocations()))
             if section.is_RELA():
@@ -423,7 +448,7 @@ class ReadElf(object):
                         symbol['st_value'],
                         fullhex=True, lead0x=False),
                     '  ' if self.elffile.elfclass == 32 else '',
-                    bytes2str(symbol_name)))
+                    symbol_name))
                 if section.is_RELA():
                     self._emit(' %s %x' % (
                         '+' if rel['r_addend'] >= 0 else '-',
@@ -448,8 +473,8 @@ class ReadElf(object):
                     section, 'Version symbols', lead0x=False)
 
                 num_symbols = section.num_symbols()
-    
-                # Symbol version info are printed four by four entries 
+
+                # Symbol version info are printed four by four entries
                 for idx_by_4 in range(0, num_symbols, 4):
 
                     self._emit('  %03x:' % idx_by_4)
@@ -495,14 +520,14 @@ class ReadElf(object):
                             self._format_hex(offset, fieldsize=6,
                                              alternate=True),
                             verdef['vd_version'], flags, verdef['vd_ndx'],
-                            verdef['vd_cnt'], bytes2str(name)))
+                            verdef['vd_cnt'], name))
 
                     verdaux_offset = (
                             offset + verdef['vd_aux'] + verdaux['vda_next'])
                     for idx, verdaux in enumerate(verdaux_iter, start=1):
                         self._emitline('  %s: Parent %i: %s' %
                             (self._format_hex(verdaux_offset, fieldsize=4),
-                                              idx, bytes2str(verdaux.name)))
+                                              idx, verdaux.name))
                         verdaux_offset += verdaux['vda_next']
 
                     offset += verdef['vd_next']
@@ -516,7 +541,7 @@ class ReadElf(object):
                     self._emitline('  %s: Version: %i  File: %s  Cnt: %i' % (
                             self._format_hex(offset, fieldsize=6,
                                              alternate=True),
-                            verneed['vn_version'], bytes2str(verneed.name),
+                            verneed['vn_version'], verneed.name,
                             verneed['vn_cnt']))
 
                     vernaux_offset = offset + verneed['vn_aux']
@@ -531,7 +556,7 @@ class ReadElf(object):
                         self._emitline(
                             '  %s:   Name: %s  Flags: %s  Version: %i' % (
                                 self._format_hex(vernaux_offset, fieldsize=4),
-                                bytes2str(vernaux.name), flags,
+                                vernaux.name, flags,
                                 vernaux['vna_other']))
 
                         vernaux_offset += vernaux['vna_next']
@@ -548,7 +573,7 @@ class ReadElf(object):
                 section_spec))
             return
 
-        self._emitline("\nHex dump of section '%s':" % bytes2str(section.name))
+        self._emitline("\nHex dump of section '%s':" % section.name)
         self._note_relocs_for_section(section)
         addr = section['sh_addr']
         data = section.data()
@@ -591,7 +616,7 @@ class ReadElf(object):
                 section_spec))
             return
 
-        self._emitline("\nString dump of section '%s':" % bytes2str(section.name))
+        self._emitline("\nString dump of section '%s':" % section.name)
 
         found = False
         data = section.data()
@@ -692,7 +717,7 @@ class ReadElf(object):
             num_entries = version_section.num_symbols()
 
         self._emitline("\n%s section '%s' contains %s entries:" %
-            (name, bytes2str(version_section.name), num_entries))
+            (name, version_section.name, num_entries))
         self._emitline('%sAddr: %s  Offset: %s  Link: %i (%s)' % (
             ' ' * indent,
             self._format_hex(
@@ -700,8 +725,7 @@ class ReadElf(object):
             self._format_hex(
                 version_section['sh_offset'], fieldsize=6, lead0x=True),
             version_section['sh_link'],
-            bytes2str(
-                self.elffile.get_section(version_section['sh_link']).name)
+                self.elffile.get_section(version_section['sh_link']).name
             )
         )
 
@@ -760,12 +784,12 @@ class ReadElf(object):
                     index <= self._versioninfo['verdef'].num_versions()):
                 _, verdaux_iter = \
                         self._versioninfo['verdef'].get_version(index)
-                symbol_version['name'] = bytes2str(next(verdaux_iter).name)
+                symbol_version['name'] = next(verdaux_iter).name
             else:
                 verneed, vernaux = \
                         self._versioninfo['verneed'].get_version(index)
-                symbol_version['name'] = bytes2str(vernaux.name)
-                symbol_version['filename'] = bytes2str(verneed.name)
+                symbol_version['name'] = vernaux.name
+                symbol_version['filename'] = verneed.name
 
         symbol_version['index'] = index
         return symbol_version
@@ -782,7 +806,7 @@ class ReadElf(object):
                 return None
         except ValueError:
             # Not a number. Must be a name then
-            return self.elffile.get_section_by_name(str2bytes(spec))
+            return self.elffile.get_section_by_name(spec)
 
     def _note_relocs_for_section(self, section):
         """ If there are relocation sections pointing to the givne section,
@@ -990,15 +1014,19 @@ class ReadElf(object):
             reg_order = sorted(ifilter(
                 lambda r: r != ra_regnum,
                 decoded_table.reg_order))
+            if len(decoded_table.reg_order):
 
-            # Headings for the registers
-            for regnum in reg_order:
-                self._emit('%-6s' % describe_reg_name(regnum))
-            self._emitline('ra      ')
+                # Headings for the registers
+                for regnum in reg_order:
+                    self._emit('%-6s' % describe_reg_name(regnum))
+                self._emitline('ra      ')
 
-            # Now include ra_regnum in reg_order to print its values similarly
-            # to the other registers.
-            reg_order.append(ra_regnum)
+                # Now include ra_regnum in reg_order to print its values similarly
+                # to the other registers.
+                reg_order.append(ra_regnum)
+            else:
+                self._emitline()
+
             for line in decoded_table.table:
                 self._emit(self._format_hex(
                     line['pc'], fullhex=True, lead0x=False))
@@ -1057,6 +1085,9 @@ def main(stream=None):
     optparser.add_option('-s', '--symbols', '--syms',
             action='store_true', dest='show_symbols',
             help='Display the symbol table')
+    optparser.add_option('-n', '--notes',
+            action='store_true', dest='show_notes',
+            help='Display the core notes (if present)')
     optparser.add_option('-r', '--relocs',
             action='store_true', dest='show_relocs',
             help='Display the relocations (if present)')
@@ -1103,6 +1134,8 @@ def main(stream=None):
                 readelf.display_dynamic_tags()
             if options.show_symbols:
                 readelf.display_symbol_tables()
+            if options.show_notes:
+                readelf.display_notes()
             if options.show_relocs:
                 readelf.display_relocations()
             if options.show_version_info:
@@ -1135,5 +1168,3 @@ def profile_main():
 if __name__ == '__main__':
     main()
     #profile_main()
-
-

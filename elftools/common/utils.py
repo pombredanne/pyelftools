@@ -31,7 +31,7 @@ def struct_parse(struct, stream, stream_pos=None):
             stream.seek(stream_pos)
         return struct.parse_stream(stream)
     except ConstructError as e:
-        raise ELFParseError(e.message)
+        raise ELFParseError(str(e))
 
 
 def parse_cstring_from_stream(stream, stream_pos=None):
@@ -88,9 +88,14 @@ def preserve_stream_pos(stream):
     stream.seek(saved_pos)
 
 
+def roundup(num, bits):
+    """ Round up a number to nearest multiple of 2^bits. The result is a number
+        where the least significant bits passed in bits are 0.
+    """
+    return (num - 1 | (1 << bits) - 1) + 1
+
 #------------------------- PRIVATE -------------------------
 
 def _assert_with_exception(cond, msg, exception_type):
     if not cond:
         raise exception_type(msg)
-

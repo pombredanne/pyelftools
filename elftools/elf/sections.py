@@ -6,9 +6,8 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-from ..construct import CString
 from ..common.utils import struct_parse, elf_assert, parse_cstring_from_stream
-
+from collections import defaultdict
 
 class Section(object):
     """ Base class for ELF sections. Also used for all sections types that have
@@ -41,6 +40,8 @@ class Section(object):
 
     def __eq__(self, other):
         return self.header == other.header
+    def __hash__(self):
+        return hash(self.header)
 
 
 class NullSection(Section):
@@ -64,7 +65,7 @@ class StringTableSection(Section):
         """
         table_offset = self['sh_offset']
         s = parse_cstring_from_stream(self.stream, table_offset + offset)
-        return s
+        return s.decode('ascii')
 
 
 class SymbolTableSection(Section):
@@ -77,9 +78,10 @@ class SymbolTableSection(Section):
         self.elfstructs = self.elffile.structs
         self.stringtable = stringtable
         elf_assert(self['sh_entsize'] > 0,
-                'Expected entry size of section %s to be > 0' % name)
+                'Expected entry size of section %r to be > 0' % name)
         elf_assert(self['sh_size'] % self['sh_entsize'] == 0,
-                'Expected section size to be a multiple of entry size in section %s' % name)
+                'Expected section size to be a multiple of entry size in section %r' % name)
+        self._symbol_name_map = None
 
     def num_symbols(self):
         """ Number of symbols in the table
@@ -98,6 +100,20 @@ class SymbolTableSection(Section):
         # Find the symbol name in the associated string table
         name = self.stringtable.get_string(entry['st_name'])
         return Symbol(entry, name)
+
+    def get_symbol_by_name(self, name):
+        """ Get a symbol(s) by name. Return None if no symbol by the given name
+            exists.
+        """
+        # The first time this method is called, construct a name to number
+        # mapping
+        #
+        if self._symbol_name_map is None:
+            self._symbol_name_map = defaultdict(list)
+            for i, sym in enumerate(self.iter_symbols()):
+                self._symbol_name_map[sym.name].append(i)
+        symnums = self._symbol_name_map.get(name)
+        return [self.get_symbol(i) for i in symnums] if symnums else None
 
     def iter_symbols(self):
         """ Yield all the symbols in the table
