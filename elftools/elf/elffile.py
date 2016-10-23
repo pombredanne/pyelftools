@@ -6,14 +6,25 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
+import io
+import struct
+import zlib
+
+try:
+    import resource
+    PAGESIZE = resource.getpagesize()
+except ImportError:
+    # Windows system
+    import mmap
+    PAGESIZE = mmap.PAGESIZE
+
 from ..common.py3compat import BytesIO
 from ..common.exceptions import ELFError
 from ..common.utils import struct_parse, elf_assert
-from ..construct import ConstructError
 from .structs import ELFStructs
 from .sections import (
         Section, StringTableSection, SymbolTableSection,
-        SUNWSyminfoTableSection, NullSection)
+        SUNWSyminfoTableSection, NullSection, NoteSection)
 from .dynamic import DynamicSection, DynamicSegment
 from .relocation import RelocationSection, RelocationHandler
 from .gnuversions import (
@@ -122,10 +133,11 @@ class ELFFile(object):
 
     def has_dwarf_info(self):
         """ Check whether this file appears to have debugging information.
-            We assume that if it has the debug_info section, it has all theother
-            required sections as well.
+            We assume that if it has the .debug_info or .zdebug_info section, it
+            has all the other required sections as well.
         """
-        return bool(self.get_section_by_name('.debug_info'))
+        return bool(self.get_section_by_name('.debug_info')) or \
+            bool(self.get_section_by_name('.zdebug_info'))
 
     def get_dwarf_info(self, relocate_dwarf_sections=True):
         """ Return a DWARFInfo object representing the debugging information in
@@ -138,32 +150,48 @@ class ELFFile(object):
         # present.
         # Sections that aren't found will be passed as None to DWARFInfo.
         #
+
+        section_names = ('.debug_info', '.debug_aranges', '.debug_abbrev', '.debug_str',
+                         '.debug_line', '.debug_frame',
+                         '.debug_loc', '.debug_ranges')
+
+        compressed = bool(self.get_section_by_name('.zdebug_info'))
+        if compressed:
+            section_names = tuple(map(lambda x: '.z' + x[1:], section_names))
+
+        debug_info_sec_name, debug_aranges_sec_name, debug_abbrev_sec_name, debug_str_sec_name, \
+            debug_line_sec_name, debug_frame_sec_name, debug_loc_sec_name, \
+            debug_ranges_sec_name = section_names
+
         debug_sections = {}
-        for secname in ('.debug_info', '.debug_abbrev', '.debug_str',
-                        '.debug_line', '.debug_frame',
-                        '.debug_loc', '.debug_ranges'):
+        for secname in section_names:
             section = self.get_section_by_name(secname)
             if section is None:
                 debug_sections[secname] = None
             else:
-                debug_sections[secname] = self._read_dwarf_section(
+                dwarf_section = self._read_dwarf_section(
                     section,
                     relocate_dwarf_sections)
+                if compressed:
+                    dwarf_section = self._decompress_dwarf_section(dwarf_section)
+                debug_sections[secname] = dwarf_section
 
         return DWARFInfo(
                 config=DwarfConfig(
                     little_endian=self.little_endian,
                     default_address_size=self.elfclass // 8,
                     machine_arch=self.get_machine_arch()),
-                debug_info_sec=debug_sections['.debug_info'],
-                debug_abbrev_sec=debug_sections['.debug_abbrev'],
-                debug_frame_sec=debug_sections['.debug_frame'],
+                debug_info_sec=debug_sections[debug_info_sec_name],
+                debug_aranges_sec=debug_sections[debug_aranges_sec_name],
+                debug_abbrev_sec=debug_sections[debug_abbrev_sec_name],
+                debug_frame_sec=debug_sections[debug_frame_sec_name],
                 # TODO(eliben): reading of eh_frame is not hooked up yet
                 eh_frame_sec=None,
-                debug_str_sec=debug_sections['.debug_str'],
-                debug_loc_sec=debug_sections['.debug_loc'],
-                debug_ranges_sec=debug_sections['.debug_ranges'],
-                debug_line_sec=debug_sections['.debug_line'])
+                debug_str_sec=debug_sections[debug_str_sec_name],
+                debug_loc_sec=debug_sections[debug_loc_sec_name],
+                debug_ranges_sec=debug_sections[debug_ranges_sec_name],
+                debug_line_sec=debug_sections[debug_line_sec_name])
+
 
     def get_machine_arch(self):
         """ Return the machine architecture, as detected from the ELF header.
@@ -279,6 +307,8 @@ class ELFFile(object):
                 section_header, name, self.stream, self)
         elif sectype == 'SHT_DYNAMIC':
             return DynamicSection(section_header, name, self.stream, self)
+        elif sectype == 'SHT_NOTE':
+            return NoteSection(section_header, name, self.stream, self)
         else:
             return Section(section_header, name, self.stream)
 
@@ -376,3 +406,38 @@ class ELFFile(object):
                 name=section.name,
                 global_offset=section['sh_offset'],
                 size=section['sh_size'])
+
+    @staticmethod
+    def _decompress_dwarf_section(section):
+        """ Returns the uncompressed contents of the provided DWARF section.
+        """
+        # TODO: support other compression formats from readelf.c
+        assert section.size > 12, 'Unsupported compression format.'
+
+        section.stream.seek(0)
+        # According to readelf.c the content should contain "ZLIB"
+        # followed by the uncompressed section size - 8 bytes in
+        # big-endian order
+        compression_type = section.stream.read(4)
+        assert compression_type == b'ZLIB', \
+            'Invalid compression type: %r' % (compression_type)
+
+        uncompressed_size = struct.unpack('>Q', section.stream.read(8))[0]
+
+        decompressor = zlib.decompressobj()
+        uncompressed_stream = BytesIO()
+        while True:
+            chunk = section.stream.read(PAGESIZE)
+            if not chunk:
+                break
+            uncompressed_stream.write(decompressor.decompress(chunk))
+        uncompressed_stream.write(decompressor.flush())
+
+        uncompressed_stream.seek(0, io.SEEK_END)
+        size = uncompressed_stream.tell()
+        assert uncompressed_size == size, \
+                'Wrong uncompressed size: expected %r, but got %r' % (
+                    uncompressed_size, size,
+                )
+
+        return section._replace(stream=uncompressed_stream, size=size)

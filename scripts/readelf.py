@@ -304,7 +304,6 @@ class ReadElf(object):
                 self._emitline('   Num:    Value          Size Type    Bind   Vis      Ndx Name')
 
             for nsym, symbol in enumerate(section.iter_symbols()):
-
                 version_info = ''
                 # readelf doesn't display version info for Solaris versioning
                 if (section['sh_type'] == 'SHT_DYNSYM' and
@@ -572,6 +571,10 @@ class ReadElf(object):
             self._emitline("Section '%s' does not exist in the file!" % (
                 section_spec))
             return
+        if section['sh_type'] == 'SHT_NOBITS':
+            self._emitline("\nSection '%s' has no data to dump." % (
+                section_spec))
+            return
 
         self._emitline("\nHex dump of section '%s':" % section.name)
         self._note_relocs_for_section(section)
@@ -613,6 +616,10 @@ class ReadElf(object):
         section = self._section_from_spec(section_spec)
         if section is None:
             self._emitline("Section '%s' does not exist in the file!" % (
+                section_spec))
+            return
+        if section['sh_type'] == 'SHT_NOBITS':
+            self._emitline("\nSection '%s' has no data to dump." % (
                 section_spec))
             return
 
@@ -662,6 +669,8 @@ class ReadElf(object):
             self._dump_debug_frames()
         elif dump_what == 'frames-interp':
             self._dump_debug_frames_interp()
+        elif dump_what == 'aranges':
+            self._dump_debug_aranges()
         else:
             self._emitline('debug dump not yet supported for "%s"' % dump_what)
 
@@ -835,7 +844,7 @@ class ReadElf(object):
     def _dump_debug_info(self):
         """ Dump the debugging info section.
         """
-        self._emitline('Contents of the .debug_info section:\n')
+        self._emitline('Contents of the %s section:\n' % self._dwarfinfo.debug_info_sec.name)
 
         # Offset of the .debug_info section in the stream
         section_offset = self._dwarfinfo.debug_info_sec.global_offset
@@ -873,7 +882,7 @@ class ReadElf(object):
                     # Unknown attribute values are passed-through as integers
                     if isinstance(name, int):
                         name = 'Unknown AT value: %x' % name
-                    self._emitline('    <%2x>   %-18s: %s' % (
+                    self._emitline('    <%x>   %-18s: %s' % (
                         attr.offset,
                         name,
                         describe_attr_value(
@@ -888,7 +897,7 @@ class ReadElf(object):
         """ Dump the (decoded) line programs from .debug_line
             The programs are dumped in the order of the CUs they belong to.
         """
-        self._emitline('Decoded dump of debug contents of section .debug_line:\n')
+        self._emitline('Decoded dump of debug contents of section %s:\n' % self._dwarfinfo.debug_line_sec.name)
 
         for cu in self._dwarfinfo.iter_CUs():
             lineprogram = self._dwarfinfo.line_program_for_CU(cu)
@@ -951,7 +960,7 @@ class ReadElf(object):
         """
         if not self._dwarfinfo.has_CFI():
             return
-        self._emitline('Contents of the .debug_frame section:')
+        self._emitline('Contents of the %s section:' % self._dwarfinfo.debug_frame_sec.name)
 
         for entry in self._dwarfinfo.CFI_entries():
             if isinstance(entry, CIE):
@@ -979,13 +988,51 @@ class ReadElf(object):
             self._emit(describe_CFI_instructions(entry))
         self._emitline()
 
+    def _dump_debug_aranges(self):
+        """ Dump the aranges table
+        """
+        aranges_table = self._dwarfinfo.get_aranges()
+        if aranges_table == None:
+            return
+        # seems redundent, but we need to get the unsorted set of entries to match system readelf
+        unordered_entries = aranges_table._get_entries()
+       
+        if len(unordered_entries) == 0:
+            self._emitline()
+            self._emitline("Section '.debug_aranges' has no debugging data.")
+            return
+            
+        self._emitline('Contents of the %s section:' % self._dwarfinfo.debug_aranges_sec.name)
+        self._emitline()
+        prev_offset = None
+        for entry in unordered_entries:
+            if prev_offset != entry.info_offset:
+                if entry != unordered_entries[0]:
+                    self._emitline('    %s %s' % (
+                        self._format_hex(0, fullhex=True, lead0x=False), 
+                        self._format_hex(0, fullhex=True, lead0x=False)))
+                self._emitline('  Length:                   %d' % (entry.unit_length))
+                self._emitline('  Version:                  %d' % (entry.version))
+                self._emitline('  Offset into .debug_info:  0x%x' % (entry.info_offset))
+                self._emitline('  Pointer Size:             %d' % (entry.address_size))
+                self._emitline('  Segment Size:             %d' % (entry.segment_size))
+                self._emitline()
+                self._emitline('    Address            Length')
+            self._emitline('    %s %s' % (
+                self._format_hex(entry.begin_addr, fullhex=True, lead0x=False), 
+                self._format_hex(entry.length, fullhex=True, lead0x=False)))
+            prev_offset = entry.info_offset
+        self._emitline('    %s %s' % (
+                self._format_hex(0, fullhex=True, lead0x=False), 
+                self._format_hex(0, fullhex=True, lead0x=False)))
+
     def _dump_debug_frames_interp(self):
         """ Dump the interpreted (decoded) frame information from .debug_frame
         """
         if not self._dwarfinfo.has_CFI():
             return
 
-        self._emitline('Contents of the .debug_frame section:')
+        self._emitline('Contents of the %s section:' % self._dwarfinfo.debug_frame_sec.name)
 
         for entry in self._dwarfinfo.CFI_entries():
             if isinstance(entry, CIE):
@@ -1057,7 +1104,7 @@ class ReadElf(object):
     def _emitline(self, s=''):
         """ Emit an object to output, followed by a newline
         """
-        self.output.write(str(s) + '\n')
+        self.output.write(str(s).rstrip() + '\n')
 
 
 SCRIPT_DESCRIPTION = 'Display information about the contents of ELF format files'
