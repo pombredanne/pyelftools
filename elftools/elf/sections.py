@@ -45,7 +45,7 @@ class Section(object):
             return self.header == other.header
         except AttributeError:
             return False
-    
+
     def __hash__(self):
         return hash(self.header)
 
@@ -71,7 +71,7 @@ class StringTableSection(Section):
         """
         table_offset = self['sh_offset']
         s = parse_cstring_from_stream(self.stream, table_offset + offset)
-        return s.decode('ascii')
+        return s.decode('ascii') if s else ''
 
 
 class SymbolTableSection(Section):
@@ -195,3 +195,28 @@ class NoteSection(Section):
             others.
         """
         return iter_notes(self.elffile, self['sh_offset'], self['sh_size'])
+
+class StabSection(Section):
+    """ ELF stab section.
+    """
+    def __init__(self, header, name, stream, elffile):
+        super(StabSection, self).__init__(header, name, stream)
+        self.elffile = elffile
+
+    def iter_stabs(self):
+        """ Yield all stab entries.  Result type is ELFStructs.Elf_Stabs.
+        """
+        elffile = self.elffile
+        offset = self['sh_offset']
+        size = self['sh_size']
+        end = offset + size
+        while offset < end:
+            stabs = struct_parse(
+                elffile.structs.Elf_Stabs,
+                elffile.stream,
+                stream_pos=offset)
+            stabs['n_offset'] = offset
+            offset += elffile.structs.Elf_Stabs.sizeof()
+            elffile.stream.seek(offset)
+            yield stabs
+

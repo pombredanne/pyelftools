@@ -4,12 +4,8 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
+import unittest
 
-from utils import setup_syspath; setup_syspath()
 from elftools.dwarf.structs import DWARFStructs
 
 
@@ -31,7 +27,7 @@ class TestDWARFStructs(unittest.TestCase):
             # and another entry
             b'\x45\x50\x51\x00\x86\x12\x07\x08' +
             # followed by NULL
-            b'\x00')	
+            b'\x00')
         self.assertEqual(c.version, 2)
         self.assertEqual(c.opcode_base, 6)
         self.assertEqual(c.standard_opcode_lengths, [0, 1, 4, 8, 12])
@@ -44,4 +40,3 @@ class TestDWARFStructs(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

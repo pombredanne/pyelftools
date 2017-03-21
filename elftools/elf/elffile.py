@@ -24,7 +24,8 @@ from ..common.utils import struct_parse, elf_assert
 from .structs import ELFStructs
 from .sections import (
         Section, StringTableSection, SymbolTableSection,
-        SUNWSyminfoTableSection, NullSection, NoteSection)
+        SUNWSyminfoTableSection, NullSection, NoteSection,
+        StabSection)
 from .dynamic import DynamicSection, DynamicSegment
 from .relocation import RelocationSection, RelocationHandler
 from .gnuversions import (
@@ -223,7 +224,6 @@ class ELFFile(object):
         # Note: this code reads the stream directly, without using ELFStructs,
         # since we don't yet know its exact format. ELF was designed to be
         # read like this - its e_ident field is word-size and endian agnostic.
-        #
         self.stream.seek(0)
         magic = self.stream.read(4)
         elf_assert(magic == b'\x7fELF', 'Magic number does not match')
@@ -309,6 +309,8 @@ class ELFFile(object):
             return DynamicSection(section_header, name, self.stream, self)
         elif sectype == 'SHT_NOTE':
             return NoteSection(section_header, name, self.stream, self)
+        elif sectype == 'SHT_PROGBITS' and name == '.stab':
+            return StabSection(section_header, name, self.stream, self)
         else:
             return Section(section_header, name, self.stream)
 

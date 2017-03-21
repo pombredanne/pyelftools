@@ -4,13 +4,9 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
+import unittest
 from random import randint
 
-from utils import setup_syspath; setup_syspath()
 from elftools.common.py3compat import int2byte, BytesIO
 from elftools.common.utils import (parse_cstring_from_stream,
         preserve_stream_pos)
@@ -60,6 +56,3 @@ class Test_preserve_stream_pos(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
-
-

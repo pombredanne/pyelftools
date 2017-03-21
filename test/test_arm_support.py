@@ -4,14 +4,11 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
+import unittest
 import os
 
-from utils import setup_syspath; setup_syspath()
 from elftools.elf.elffile import ELFFile
+
 
 class TestARMSupport(unittest.TestCase):
     def test_hello(self):
@@ -39,6 +36,6 @@ class TestARMSupport(unittest.TestCase):
             all_CUs = list(dwarfinfo.iter_CUs())
             self.assertEqual(len(all_CUs), 9)
 
+
 if __name__ == '__main__':
     unittest.main()
-
