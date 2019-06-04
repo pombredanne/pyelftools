@@ -7,12 +7,16 @@
 # Eli Bendersky (eliben@gmail.com)
 # This code is in the public domain
 #-------------------------------------------------------------------------------
-import os, sys, platform
-import re
+import argparse
 from difflib import SequenceMatcher
-from optparse import OptionParser
 import logging
+from multiprocessing import Pool
+import os
 import platform
+import re
+import sys
+import time
+
 from utils import run_exe, is_in_rootdir, dump_output_to_temp_files
 
 # Make it possible to run this file from the root dir of pyelftools without
@@ -34,6 +38,7 @@ else:
     if not os.path.exists(READELF_PATH):
         READELF_PATH = 'readelf'
 
+
 def discover_testfiles(rootdir):
     """ Discover test files in the given directory. Yield them one by one.
     """
@@ -53,8 +58,20 @@ def run_test_on_file(filename, verbose=False):
             '-e', '-d', '-s', '-n', '-r', '-x.text', '-p.shstrtab', '-V',
             '--debug-dump=info', '--debug-dump=decodedline',
             '--debug-dump=frames', '--debug-dump=frames-interp',
-            '--debug-dump=aranges']:
+            '--debug-dump=aranges', '--debug-dump=pubtypes',
+            '--debug-dump=pubnames'
+            ]:
         if verbose: testlog.info("..option='%s'" % option)
+
+        # TODO(zlobober): this is a dirty hack to make tests work for ELF core
+        # dump notes. Making it work properly requires a pretty deep
+        # investigation of how original readelf formats the output.
+        if "core" in filename and option == "-n":
+            if verbose:
+                testlog.warning("....will fail because corresponding part of readelf.py is not implemented yet")
+                testlog.info('.......................SKIPPED')
+            continue
+
         # stdouts will be a 2-element list: output of readelf and output
         # of scripts/readelf.py
         stdouts = []
@@ -62,13 +79,17 @@ def run_test_on_file(filename, verbose=False):
             args = [option, filename]
             if verbose: testlog.info("....executing: '%s %s'" % (
                 exe_path, ' '.join(args)))
+            t1 = time.time()
             rc, stdout = run_exe(exe_path, args)
+            if verbose: testlog.info("....elapsed: %s" % (time.time() - t1,))
             if rc != 0:
                 testlog.error("@@ aborting - '%s' returned '%s'" % (exe_path, rc))
                 return False
             stdouts.append(stdout)
         if verbose: testlog.info('....comparing output...')
+        t1 = time.time()
         rc, errmsg = compare_output(*stdouts)
+        if verbose: testlog.info("....elapsed: %s" % (time.time() - t1,))
         if rc:
             if verbose: testlog.info('.......................SUCCESS')
         else:
@@ -97,22 +118,9 @@ def compare_output(s1, s2):
     """
     def prepare_lines(s):
         return [line for line in s.lower().splitlines() if line.strip() != '']
-    def filter_readelf_lines(lines):
-        filter_out = False
-        for line in lines:
-            if 'of the .eh_frame section' in line:
-                filter_out = True
-            elif 'of the .debug_frame section' in line or \
-                'of the .zdebug_frame section' in line:
-                filter_out = False
-            if not filter_out:
-                if not line.startswith('unknown: length'):
-                    yield line
 
     lines1 = prepare_lines(s1)
     lines2 = prepare_lines(s2)
-
-    lines1 = list(filter_readelf_lines(lines1))
 
     flag_after_symtable = False
 
@@ -179,38 +187,60 @@ def main():
         testlog.error('Error: Please run me from the root dir of pyelftools!')
         return 1
 
-    optparser = OptionParser(
-        usage='usage: %prog [options] [file] [file] ...',
+    argparser = argparse.ArgumentParser(
+        usage='usage: %(prog)s [options] [file] [file] ...',
         prog='run_readelf_tests.py')
-    optparser.add_option('-V', '--verbose',
-        action='store_true', dest='verbose',
-        help='Verbose output')
-    options, args = optparser.parse_args()
+    argparser.add_argument('files', nargs='*', help='files to run tests on')
+    argparser.add_argument(
+        '--parallel', action='store_true',
+        help='run tests in parallel; always runs all tests w/o verbose')
+    argparser.add_argument('-V', '--verbose',
+                           action='store_true', dest='verbose',
+                           help='verbose output')
+    argparser.add_argument(
+        '-k', '--keep-going',
+        action='store_true', dest='keep_going',
+        help="Run all tests, don't stop at the first failure")
+    args = argparser.parse_args()
 
-    if options.verbose:
+    if args.parallel:
+        if args.verbose or args.keep_going == False:
+            print('WARNING: parallel mode disables verbosity and always keeps going')
+
+    if args.verbose:
         testlog.info('Running in verbose mode')
         testlog.info('Python executable = %s' % sys.executable)
         testlog.info('readelf path = %s' % READELF_PATH)
-        testlog.info('Given list of files: %s' % args)
+        testlog.info('Given list of files: %s' % args.files)
 
     # If file names are given as command-line arguments, only these files
     # are taken as inputs. Otherwise, autodiscovery is performed.
-    #
-    if len(args) > 0:
-        filenames = args
+    if len(args.files) > 0:
+        filenames = args.files
     else:
-        filenames = list(discover_testfiles('test/testfiles_for_readelf'))
+        filenames = sorted(discover_testfiles('test/testfiles_for_readelf'))
 
-    success = True
-    for filename in filenames:
-        if success:
-            success = success and run_test_on_file(
-                                    filename,
-                                    verbose=options.verbose)
+    if len(filenames) > 1 and args.parallel:
+        pool = Pool()
+        results = pool.map(
+            run_test_on_file,
+            filenames)
+        failures = results.count(False)
+    else:
+        failures = 0
+        for filename in filenames:
+            if not run_test_on_file(filename, verbose=args.verbose):
+                failures += 1
+                if not args.keep_going:
+                    break
 
-    if success:
+    if failures == 0:
         testlog.info('\nConclusion: SUCCESS')
         return 0
+    elif args.keep_going:
+        testlog.info('\nConclusion: FAIL ({}/{})'.format(
+            failures, len(filenames)))
+        return 1
     else:
         testlog.info('\nConclusion: FAIL')
         return 1

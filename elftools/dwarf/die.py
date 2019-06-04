@@ -143,7 +143,7 @@ class DIE(object):
     #------ PRIVATE ------#
 
     def __repr__(self):
-        s = 'DIE %s, size=%s, has_chidren=%s\n' % (
+        s = 'DIE %s, size=%s, has_children=%s\n' % (
             self.tag, self.size, self.has_children)
         for attrname, attrval in iteritems(self.attributes):
             s += '    |%-18s:  %s\n' % (attrname, attrval)
@@ -162,7 +162,6 @@ class DIE(object):
         # obtain the abbrev declaration for this DIE.
         # Note: here and elsewhere, preserve_stream_pos is used on operations
         # that manipulate the stream by reading data from it.
-        #
         self.abbrev_code = struct_parse(
             structs.Dwarf_uleb128(''), self.stream, self.offset)
 
@@ -171,15 +170,12 @@ class DIE(object):
             self.size = self.stream.tell() - self.offset
             return
 
-        with preserve_stream_pos(self.stream):
-            abbrev_decl = self.cu.get_abbrev_table().get_abbrev(
-                self.abbrev_code)
+        abbrev_decl = self.cu.get_abbrev_table().get_abbrev(self.abbrev_code)
         self.tag = abbrev_decl['tag']
         self.has_children = abbrev_decl.has_children()
 
         # Guided by the attributes listed in the abbreviation declaration, parse
         # values from the stream.
-        #
         for name, form in abbrev_decl.iter_attr_specs():
             attr_offset = self.stream.tell()
             raw_value = struct_parse(structs.Dwarf_dw_form[form], self.stream)

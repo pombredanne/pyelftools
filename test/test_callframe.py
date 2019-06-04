@@ -63,7 +63,7 @@ class TestCallFrame(unittest.TestCase):
         s.write(data)
 
         structs = DWARFStructs(little_endian=True, dwarf_format=32, address_size=4)
-        cfi = CallFrameInfo(s, len(data), structs)
+        cfi = CallFrameInfo(s, len(data), 0, structs)
         entries = cfi.get_entries()
 
         self.assertEqual(len(entries), 2)
@@ -137,7 +137,7 @@ class TestCallFrame(unittest.TestCase):
         s = BytesIO(data)
 
         structs = DWARFStructs(little_endian=True, dwarf_format=32, address_size=4)
-        cfi = CallFrameInfo(s, len(data), structs)
+        cfi = CallFrameInfo(s, len(data), 0, structs)
         entries = cfi.get_entries()
 
         set_global_machine_arch('x86')
@@ -148,5 +148,3 @@ class TestCallFrame(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
-

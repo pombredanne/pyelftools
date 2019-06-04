@@ -7,7 +7,7 @@
 # This code is in the public domain
 #-------------------------------------------------------------------------------
 import os, sys
-from distutils.core import setup
+from setuptools import setup
 
 
 try:
@@ -24,7 +24,7 @@ setup(
     description='Library for analyzing ELF files and DWARF debugging information',
     long_description=description,
     license='Public domain',
-    version='0.24',
+    version='0.25',
     author='Eli Bendersky',
     maintainer='Eli Bendersky',
     author_email='eliben@gmail.com',
